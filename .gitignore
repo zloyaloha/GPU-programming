@@ -39,3 +39,10 @@
 
 # debug information files
 *.dwo
+*.asc
+*.out
+
+build/
+*.csv
+*.png
+tests/

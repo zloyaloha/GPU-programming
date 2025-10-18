@@ -1,0 +1,1 @@
+add_executable(lab2 main.cu)
