@@ -46,3 +46,8 @@ build/
 *.csv
 *.png
 tests/
+
+*.bin
+passfrase
+*.data
+*.txt
