@@ -4,7 +4,7 @@
 #include <chrono>
 #include <cassert>
 
-const int MAX_SHARED_ELEMENTS = 10000;
+const int MAX_SHARED_ELEMENTS = 1024;
 
 inline void checkCuda(cudaError_t err, const char *msg = nullptr) {
     if (err != cudaSuccess) {
@@ -93,53 +93,54 @@ unsigned int next_pow_2(unsigned int v) {
 void bitonic_sort_adaptive(int *d_data, unsigned int n) {
     unsigned int m = next_pow_2(n);
 
-    // double sum = 0;
-    // int kernel_n = 0;
+    double sum = 0;
+    int kernel_n = 0;
 
-    if (m < MAX_SHARED_ELEMENTS) {
+    if (m <= MAX_SHARED_ELEMENTS) {
         std::cout << "USING SHARED MEMORY\n";
-        unsigned int seg_len = 512;
+        unsigned int seg_len = 1024;
         unsigned int seg_blocks = (m + seg_len - 1) / seg_len;
         unsigned int th = seg_len;
+        if (th > 1024u) th = 1024u;
         size_t shmem = seg_len * sizeof(int);
-        // cudaEvent_t start, stop;
-        // checkCuda(cudaEventCreate(&start));
-        // checkCuda(cudaEventCreate(&stop));
-        // checkCuda(cudaEventRecord(start));
-        bitonic_block_sort_shared<<<seg_blocks, th, shmem>>>(d_data, m, seg_len);
+        cudaEvent_t start, stop;
+        checkCuda(cudaEventCreate(&start));
+        checkCuda(cudaEventCreate(&stop));
+        checkCuda(cudaEventRecord(start));
+        bitonic_block_sort_shared<<<1, th, shmem>>>(d_data, m, seg_len);
         checkCuda(cudaGetLastError(), "block_sort_shared launch failed");
-        // checkCuda(cudaEventRecord(stop));
-        // checkCuda(cudaEventSynchronize(stop));
-        // checkCuda(cudaGetLastError());
-        // float t;
-        // checkCuda(cudaEventElapsedTime(&t, start, stop));
-        // checkCuda(cudaEventDestroy(start));
-        // checkCuda(cudaEventDestroy(stop));
-        // ++kernel_n;
-        // sum += t;
+        checkCuda(cudaEventRecord(stop));
+        checkCuda(cudaEventSynchronize(stop));
+        checkCuda(cudaGetLastError());
+        float t;
+        checkCuda(cudaEventElapsedTime(&t, start, stop));
+        checkCuda(cudaEventDestroy(start));
+        checkCuda(cudaEventDestroy(stop));
+        ++kernel_n;
+        sum += t;
     } else {
         std::cout << "USING GLOBAL MEMORY\n";
         for (unsigned int block_size = 2; block_size <= m; block_size <<= 1) {
             for (unsigned int distance = block_size >> 1; distance > 0; distance >>= 1) {
-                // cudaEvent_t start, stop;
-                // checkCuda(cudaEventCreate(&start));
-                // checkCuda(cudaEventCreate(&stop));
-                // checkCuda(cudaEventRecord(start));
+                cudaEvent_t start, stop;
+                checkCuda(cudaEventCreate(&start));
+                checkCuda(cudaEventCreate(&stop));
+                checkCuda(cudaEventRecord(start));
                 bitonic_global_merge<<<8192, 768>>>(d_data, m, distance, block_size);
                 checkCuda(cudaGetLastError(), "global_merge launch failed");
-                // checkCuda(cudaEventRecord(stop));
-                // checkCuda(cudaEventSynchronize(stop));
-                // checkCuda(cudaGetLastError());
-                // float t;
-                // checkCuda(cudaEventElapsedTime(&t, start, stop));
-                // checkCuda(cudaEventDestroy(start));
-                // checkCuda(cudaEventDestroy(stop));
-                // ++kernel_n;
-                // sum += t;
+                checkCuda(cudaEventRecord(stop));
+                checkCuda(cudaEventSynchronize(stop));
+                checkCuda(cudaGetLastError());
+                float t;
+                checkCuda(cudaEventElapsedTime(&t, start, stop));
+                checkCuda(cudaEventDestroy(start));
+                checkCuda(cudaEventDestroy(stop));
+                ++kernel_n;
+                sum += t;
             }
         }
     }
-    // std::cout << "Total: " << sum << " Average: " << sum / kernel_n << std::endl;
+    std::cout << "Total: " << sum << " Average: " << sum / kernel_n << std::endl;
 }
 
 std::vector<int> read_to_vec() {
@@ -171,7 +172,7 @@ void write_to_cout_bin(std::vector<int>& nums)
 }
 
 int main() {
-    std::vector<int> h_data = read_to_vec_bin();
+    std::vector<int> h_data = read_to_vec();
     unsigned int n = static_cast<unsigned int>(h_data.size());
     if (n == 0) return 0;
 
@@ -181,7 +182,7 @@ int main() {
     for (unsigned int i = 0; i < n; ++i) h_pad[i] = h_data[i];
     for (unsigned int block_size = 2; block_size <= m; block_size <<= 1) {
         for (unsigned int distance = block_size >> 1; distance > 0; distance >>= 1) {
-            bitonic_cpu_merge(h_pad.data(), m, distance, block_size);
+            // bitonic_cpu_merge(h_pad.data(), m, distance, block_size);
         }
     }
     auto end = std::chrono::high_resolution_clock::now();
@@ -199,6 +200,6 @@ int main() {
 
     std::vector<int> result(n);
     for (unsigned int i = 0; i < n; ++i) result[i] = h_pad[i];
-    write_to_cout_bin(result);
+    // write_to_cout(result);
     return 0;
 }
