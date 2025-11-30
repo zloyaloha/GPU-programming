@@ -10,8 +10,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Устанавливаем стандарт CUDA
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_ARCHITECTURES 80;86;89)
+
 
 add_subdirectory(lab1)
 add_subdirectory(lab2)
 add_subdirectory(lab3)
 add_subdirectory(lab4)
+add_subdirectory(lab5)

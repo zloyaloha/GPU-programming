@@ -202,51 +202,51 @@ int main() {
     int min_blocks = 0, min_threads = 0;
 
     // Выводим заголовок CSV
-printf("threads,blocks,total_threads,avg_time_ms,min_time_ms,max_time_ms\n");
+    printf("threads,blocks,total_threads,avg_time_ms,min_time_ms,max_time_ms\n");
 
-for (int i = 32; i < 1025; i += 32) {
-    for (int j = 32; j < 1025; j += 32) {
-        float total_time = 0.0f;
-        float min_time = 1e10f;
-        float max_time = 0.0f;
+    for (int i = 32; i < 1025; i += 32) {
+        for (int j = 32; j < 1025; j += 32) {
+            float total_time = 0.0f;
+            float min_time = 1e10f;
+            float max_time = 0.0f;
 
-        cudaEvent_t start, stop;
-        CSC(cudaEventCreate(&start));
-        CSC(cudaEventCreate(&stop));
+            cudaEvent_t start, stop;
+            CSC(cudaEventCreate(&start));
+            CSC(cudaEventCreate(&stop));
 
-        for (int run = 0; run < num_runs; run++) {
-            CSC(cudaEventRecord(start));
+            for (int run = 0; run < num_runs; run++) {
+                CSC(cudaEventRecord(start));
 
-            classifyMLC<<<i, j>>>(d_pixels, N, nc);
+                classifyMLC<<<i, j>>>(d_pixels, N, nc);
 
-            CSC(cudaEventRecord(stop));
-            CSC(cudaEventSynchronize(stop));
-            CSC(cudaGetLastError());
+                CSC(cudaEventRecord(stop));
+                CSC(cudaEventSynchronize(stop));
+                CSC(cudaGetLastError());
 
-            float t;
-            CSC(cudaEventElapsedTime(&t, start, stop));
+                float t;
+                CSC(cudaEventElapsedTime(&t, start, stop));
 
-            total_time += t;
-            if (t < min_time) min_time = t;
-            if (t > max_time) max_time = t;
+                total_time += t;
+                if (t < min_time) min_time = t;
+                if (t > max_time) max_time = t;
+            }
+
+            CSC(cudaEventDestroy(start));
+            CSC(cudaEventDestroy(stop));
+
+            float avg_time = total_time / num_runs;
+
+            if (avg_time < min_avg_time) {
+                min_blocks = i;
+                min_threads = j;
+                min_avg_time = avg_time;
+            }
+
+            printf("%d,%d,%d,%.6f,%.6f,%.6f\n", i, j, i*j, avg_time, min_time, max_time);
         }
-
-        CSC(cudaEventDestroy(start));
-        CSC(cudaEventDestroy(stop));
-
-        float avg_time = total_time / num_runs;
-
-        if (avg_time < min_avg_time) {
-            min_blocks = i;
-            min_threads = j;
-            min_avg_time = avg_time;
-        }
-
-        printf("%d,%d,%d,%.6f,%.6f,%.6f\n", i, j, i*j, avg_time, min_time, max_time);
     }
-}
 
-    printf("MINIMAL avg_time = %f ms, block = %d, threads = %d\n", min_avg_time, min_blocks, min_threads);
+        printf("MINIMAL avg_time = %f ms, block = %d, threads = %d\n", min_avg_time, min_blocks, min_threads);
 
     uchar4* result = (uchar4*)malloc(N*sizeof(uchar4));
     CSC(cudaMemcpy(result, d_pixels, N*sizeof(uchar4), cudaMemcpyDeviceToHost));

@@ -1,4 +1,5 @@
 #include <iostream>
+#include <cuda_runtime.h>
 #include <thrust/swap.h>
 #include <thrust/sequence.h>
 #include <thrust/extrema.h>
@@ -66,6 +67,24 @@ __global__ void kernel(double *data, int n, int diag_i)
     }
 }
 
+struct ThrustInitializer {
+    ThrustInitializer() {
+        cudaError_t set_device_err = cudaSetDevice(0);
+        if (set_device_err != cudaSuccess) {
+            std::cerr << "FATAL THRUST INITIALIZATION FAILED BEFORE MAIN: "
+                      << cudaGetErrorString(set_device_err)
+                      << " (" << set_device_err << ")"
+                      << std::endl;
+            // Внимание: Здесь мы не можем использовать return 1, но можем вызвать exit.
+            exit(1);
+        }
+        // std::cerr << "DEBUG: CUDA successfully initialized by ThrustInitializer." << std::endl;
+    }
+};
+
+// Глобальный статический объект, который запускает инициализацию до main()
+ThrustInitializer global_thrust_initializer;
+
 int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(nullptr);
@@ -89,6 +108,10 @@ int main() {
     int num_swaps = 0;
     AbsComparator comparator;
     thrust::device_ptr<double> i_col_ptr, i_max_elem_in_col_ptr;
+    cudaEvent_t start, stop;
+    CSC(cudaEventCreate(&start));
+    CSC(cudaEventCreate(&stop));
+    CSC(cudaEventRecord(start));
     for (int i = 0; i < n - 1; ++i) {
         int idx_max_in_col;
         i_col_ptr = thrust::device_pointer_cast(d_mat + i * n);
@@ -110,13 +133,18 @@ int main() {
         if (i != idx_max_in_col) {
             swap_rows<<<1024, 1024>>>(d_mat, n, i, idx_max_in_col);
             num_swaps++;
-            // CSC(cudaDeviceSynchronize());
+            CSC(cudaDeviceSynchronize());
         }
         divide<<<1024, 1024>>>(d_mat, n, i);
-        // CSC(cudaDeviceSynchronize());
+        CSC(cudaDeviceSynchronize());
         kernel<<<dim3(32, 32), dim3(32, 32)>>>(d_mat, n, i);
-        // CSC(cudaDeviceSynchronize());
+        CSC(cudaDeviceSynchronize());
     }
+    CSC(cudaEventRecord(stop));
+    CSC(cudaEventSynchronize(stop));
+    float t;
+    CSC(cudaEventElapsedTime(&t, start, stop));
+    printf("%f\n",t);
     cudaMemcpy(mat, d_mat, sizeof(double) * n * n, cudaMemcpyDeviceToHost);
 
     double determinant = 1.0;
