@@ -1,0 +1,7 @@
+CompileFlags:
+  Add: [-Wall, -std=c++17]
+  Compiler: nvcc
+If:
+  PathMatch: "**/**.cu"
+Index:
+  Background: Skip

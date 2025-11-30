@@ -1,9 +1,10 @@
 #include <iostream>
 #include <vector>
 #include <cuda_runtime.h>
+#include <chrono>
 #include <cassert>
 
-const int MAX_SHARED_ELEMENTS = 1;
+const int MAX_SHARED_ELEMENTS = 10000;
 
 inline void checkCuda(cudaError_t err, const char *msg = nullptr) {
     if (err != cudaSuccess) {
@@ -16,8 +17,6 @@ inline void checkCuda(cudaError_t err, const char *msg = nullptr) {
 __global__ void bitonic_global_merge(int *data, unsigned int m, unsigned int distance, unsigned int block_size) {
     unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x; // айди нити
     if (tid >= m) return;
-    // выбираем пару для потока, то есть происходит свап между элементом с номером потока и элементом XOR(номер потока, расстояние)
-    // по сути происходит i + distance только с учётом, что i + distance выходил бы за пределы потока
     unsigned int ix = tid ^ distance;
 
     if (ix > tid && ix < m) {
@@ -27,6 +26,22 @@ __global__ void bitonic_global_merge(int *data, unsigned int m, unsigned int dis
         if ((a > b) == dir) {
             data[tid] = b;
             data[ix] = a;
+        }
+    }
+}
+
+void bitonic_cpu_merge(int *data, unsigned int m, unsigned int distance, unsigned int block_size) {
+    for (int tid = 0; tid < m; ++tid) {
+        if (tid >= m) return;
+        unsigned int ix = tid ^ distance;
+        if (ix > tid && ix < m) {
+            bool dir = ((tid & block_size) == 0);
+            int a = data[tid];
+            int b = data[ix];
+            if ((a > b) == dir) {
+                data[tid] = b;
+                data[ix] = a;
+            }
         }
     }
 }
@@ -46,8 +61,6 @@ __global__ void bitonic_block_sort_shared(int *data, unsigned int m, unsigned in
     for (unsigned int block_size = 2; block_size <= seg_len; block_size <<= 1) {
         for (unsigned int distance = block_size >> 1; distance > 0; distance >>= 1) {
             unsigned int ix = tid ^ distance;
-            // unsigned int ix = tid + distance;
-            // if (ix > block_size) return;
             if (ix > tid && ix < seg_len) {
                 bool dir = ((tid & block_size) == 0);
                 int a = s_data[tid];
@@ -79,31 +92,54 @@ unsigned int next_pow_2(unsigned int v) {
 
 void bitonic_sort_adaptive(int *d_data, unsigned int n) {
     unsigned int m = next_pow_2(n);
-    unsigned int threads = 256;
-    unsigned int blocks = (m + threads - 1) / threads;
-    std::vector<int> h_pad(m, INT_MAX);
+
+    // double sum = 0;
+    // int kernel_n = 0;
 
     if (m < MAX_SHARED_ELEMENTS) {
-        for (unsigned int block_size = 2; block_size <= m; block_size <<= 1) {
-            for (unsigned int distance = block_size >> 1; distance > 0; distance >>= 1) {
-                unsigned int seg_len = block_size;
-                unsigned int seg_blocks = (m + seg_len - 1) / seg_len;
-                unsigned int th = seg_len;
-                if (th > 1024u) th = 1024u;
-                size_t shmem = seg_len * sizeof(int);
-
-                bitonic_block_sort_shared<<<seg_blocks, th, shmem>>>(d_data, m, seg_len);
-                checkCuda(cudaGetLastError(), "block_sort_shared launch failed");
-            }
-        }
+        std::cout << "USING SHARED MEMORY\n";
+        unsigned int seg_len = 512;
+        unsigned int seg_blocks = (m + seg_len - 1) / seg_len;
+        unsigned int th = seg_len;
+        size_t shmem = seg_len * sizeof(int);
+        // cudaEvent_t start, stop;
+        // checkCuda(cudaEventCreate(&start));
+        // checkCuda(cudaEventCreate(&stop));
+        // checkCuda(cudaEventRecord(start));
+        bitonic_block_sort_shared<<<seg_blocks, th, shmem>>>(d_data, m, seg_len);
+        checkCuda(cudaGetLastError(), "block_sort_shared launch failed");
+        // checkCuda(cudaEventRecord(stop));
+        // checkCuda(cudaEventSynchronize(stop));
+        // checkCuda(cudaGetLastError());
+        // float t;
+        // checkCuda(cudaEventElapsedTime(&t, start, stop));
+        // checkCuda(cudaEventDestroy(start));
+        // checkCuda(cudaEventDestroy(stop));
+        // ++kernel_n;
+        // sum += t;
     } else {
+        std::cout << "USING GLOBAL MEMORY\n";
         for (unsigned int block_size = 2; block_size <= m; block_size <<= 1) {
             for (unsigned int distance = block_size >> 1; distance > 0; distance >>= 1) {
-                bitonic_global_merge<<<blocks, threads>>>(d_data, m, distance, block_size);
+                // cudaEvent_t start, stop;
+                // checkCuda(cudaEventCreate(&start));
+                // checkCuda(cudaEventCreate(&stop));
+                // checkCuda(cudaEventRecord(start));
+                bitonic_global_merge<<<8192, 768>>>(d_data, m, distance, block_size);
                 checkCuda(cudaGetLastError(), "global_merge launch failed");
+                // checkCuda(cudaEventRecord(stop));
+                // checkCuda(cudaEventSynchronize(stop));
+                // checkCuda(cudaGetLastError());
+                // float t;
+                // checkCuda(cudaEventElapsedTime(&t, start, stop));
+                // checkCuda(cudaEventDestroy(start));
+                // checkCuda(cudaEventDestroy(stop));
+                // ++kernel_n;
+                // sum += t;
             }
         }
     }
+    // std::cout << "Total: " << sum << " Average: " << sum / kernel_n << std::endl;
 }
 
 std::vector<int> read_to_vec() {
@@ -141,7 +177,16 @@ int main() {
 
     unsigned int m = next_pow_2(n);
     std::vector<int> h_pad(m, INT_MAX);
+    auto start = std::chrono::high_resolution_clock::now();
     for (unsigned int i = 0; i < n; ++i) h_pad[i] = h_data[i];
+    for (unsigned int block_size = 2; block_size <= m; block_size <<= 1) {
+        for (unsigned int distance = block_size >> 1; distance > 0; distance >>= 1) {
+            bitonic_cpu_merge(h_pad.data(), m, distance, block_size);
+        }
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    std::cout << "Время выполнения: " << diff.count() * 1000 << " миллисекунд" << std::endl;
 
     int *d_data = nullptr;
     checkCuda(cudaMalloc(&d_data, m * sizeof(int)), "cudaMalloc failed");
